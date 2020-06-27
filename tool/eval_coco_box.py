@@ -9,16 +9,16 @@ import pylab
 import pycocotools
 import joblib
 
-pylab.rcParams['figure.figsize'] = (10.0, 8.0)
 
-
-annType = ['segm', 'bbox', 'keypoints']
-annType = annType[1]  # specify type here
-prefix = 'person_keypoints' if annType == 'keypoints' else 'instances'
-print('Running demo for *%s* results.' % (annType))
 
 
 def eval(resFile,m,annFile=r'D:\dataset\annotations_trainval2017\annotations/instances_val2017.json'):
+    pylab.rcParams['figure.figsize'] = (10.0, 8.0)
+
+    annType = ['segm', 'bbox', 'keypoints']
+    annType = annType[1]  # specify type here
+    prefix = 'person_keypoints' if annType == 'keypoints' else 'instances'
+    print('Running demo for *%s* results.' % (annType))
     cocoGt = COCO(annFile)
     imgIds = cocoGt.getImgIds()
     imgIds = sorted(imgIds)
