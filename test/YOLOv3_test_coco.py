@@ -383,8 +383,6 @@ class YOLOv3(nn.Module):
                 h, w = x.shape[2:]
                 a = 0
                 b = 0
-                h=int(h)
-                w=int(w)
                 if w % 2 == 1:
                     a = 1
                 if h % 2 == 1:

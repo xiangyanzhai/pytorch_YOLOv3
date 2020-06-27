@@ -7,12 +7,10 @@ import numpy as np
 import skimage.io as io
 import pylab
 import pycocotools
-from sklearn.externals import joblib
-
+import joblib
 
 pylab.rcParams['figure.figsize'] = (10.0, 8.0)
-import tensorflow as tf
-import cv2
+
 
 annType = ['segm', 'bbox', 'keypoints']
 annType = annType[1]  # specify type here
