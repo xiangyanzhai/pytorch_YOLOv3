@@ -540,7 +540,8 @@ def model2onnx(model, output_names, onnx_name):
 
     torch.onnx.export(
         model, dummy_input, onnx_name, verbose=True,
-        input_names=input_names, output_names=output_names)
+        input_names=input_names, output_names=output_names,
+        dynamic_axes={'input_batch': {0:'batch'}, 'out1': {0:'batch'},'out2':{0:'batch'}})
 
 
 if __name__ == "__main__":
