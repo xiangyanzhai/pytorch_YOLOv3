@@ -524,7 +524,7 @@ def test_coco(model):
 
 
 def model2onnx(model, output_names, onnx_name):
-    dummy_input = torch.randn(1, 3, 320, 320)
+    dummy_input = torch.randn(1, 3, model.input_height, model.input_width)
     # device = torch.device("cuda")
 
     # model = trt_pose.models.wresnet50_baseline_att(25, 52, pretrained=False).eval()
