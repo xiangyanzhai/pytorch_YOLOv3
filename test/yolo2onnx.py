@@ -18,8 +18,38 @@ def cuda(x):
 
 import torchvision
 import torch.nn.functional as F
-import tool.yolo_util as yolo_util
-from tool.config import Config
+
+
+def parse_cfg(cfgfile):
+    """
+    Takes a configuration file
+
+    Returns a list of blocks. Each blocks describes a block in the neural
+    network to be built. Block is represented as a dictionary in the list
+
+    """
+
+    file = open(cfgfile, 'r')
+    lines = file.read().split('\n')  # store the lines in a list
+    lines = [x for x in lines if len(x) > 0]  # get read of the empty lines
+    lines = [x for x in lines if x[0] != '#']  # get rid of comments
+    lines = [x.rstrip().lstrip() for x in lines]  # get rid of fringe whitespaces
+
+    block = {}
+    blocks = []
+
+    for line in lines:
+        if line[0] == "[":  # This marks the start of a new block
+            if len(block) != 0:  # If block is not empty, implies it is storing values of previous block.
+                blocks.append(block)  # add it the blocks list
+                block = {}  # re-init the block
+            block["type"] = line[1:-1].rstrip()
+        else:
+            key, value = line.split("=")
+            block[key.rstrip()] = value.lstrip()
+    blocks.append(block)
+
+    return blocks
 
 
 def get_coord(N, stride):
@@ -183,10 +213,10 @@ def decode_net(net, anchors, coord, stride):
 
 
 class YOLOv3(nn.Module):
-    def __init__(self, config):
+    def __init__(self, cfg_file, stride=[32, 16, 8]):
         super(YOLOv3, self).__init__()
-        self.config = config
-        blocks = yolo_util.parse_cfg(config.cfg_file)
+        self.stride = stride
+        blocks = parse_cfg(cfg_file)
         self.input_width = int(blocks[0]['width'])
         self.input_height = int(blocks[0]['height'])
         self.blocks = blocks[1:]
@@ -307,8 +337,9 @@ class YOLOv3(nn.Module):
         self.base_anchors = torch.tensor(base_anchors)
         self.base_anchors = cuda(self.base_anchors)
         self.coords = []
-        for i in range(len(self.config.stride)):
-            self.coords.append(cuda(get_coord(max(self.input_width, self.input_height), self.config.stride[i])))
+        for i in range(base_anchors.shape[0]):
+            self.coords.append(
+                cuda(get_coord(max(max(self.input_width, self.input_height), 640), self.stride[i])))
 
     def process_img(self, img):
         h, w = img.shape[:2]
@@ -397,6 +428,7 @@ class YOLOv3(nn.Module):
         return outs
 
     def forward(self, x):
+        batch, _, input_height, input_width = x.shape
         net = []
         outs = []
         for index, xx in enumerate(self.blocks):
@@ -406,8 +438,8 @@ class YOLOv3(nn.Module):
             elif (xx["type"] == "upsample"):
                 stride = int(xx["stride"])
                 x = F.interpolate(x, size=(
-                    self.input_height // self.config.stride[len(outs)],
-                    self.input_width // self.config.stride[len(outs)]))
+                    input_height // self.stride[len(outs)],
+                    input_width // self.stride[len(outs)]))
 
             elif (xx["type"] == "route"):
                 temp = []
@@ -433,97 +465,26 @@ class YOLOv3(nn.Module):
                 net.append(x)
             else:
                 net.append(None)
-        return outs
+        decode = []
+        i = 0
+
+        for out in outs:
+            out = out.permute(0, 2, 3, 1)
+            m_H, m_W = out.shape[1:3]
+            out = out.reshape(batch, m_H, m_W, 3, -1)
+            out = decode_net(out, self.base_anchors[i], self.coords[i][:m_H, :m_W], self.stride[i])
+            out = out.view(batch, -1, self.num_cls + 5)
+            decode.append(out)
+            i += 1
+        decode = torch.cat(decode, dim=1)
+        decode[..., slice(0, 4, 2)] = torch.clamp(decode[..., slice(0, 4, 2)], 0, input_width)
+        decode[..., slice(1, 4, 2)] = torch.clamp(decode[..., slice(1, 4, 2)], 0, input_height)
+        decode[..., :4] = decode[..., :4] / cuda(
+            torch.tensor([input_width, input_height, input_width, input_height], dtype=torch.float32))
+        return decode
 
 
-import os
-from datetime import datetime
-import joblib
-import json
-from tool import eval_coco_box
-
-
-def loadNumpyAnnotations(data):
-    """
-    Convert result data from a numpy array [Nx7] where each row contains {imageID,x1,y1,w,h,score,class}
-    :param  data (numpy.ndarray)
-    :return: annotations (python nested list)
-    """
-    print('Converting ndarray to lists...')
-    assert (type(data) == np.ndarray)
-    print(data.shape)
-    assert (data.shape[1] == 7)
-    N = data.shape[0]
-    ann = []
-    for i in range(N):
-        if i % 1000000 == 0:
-            print('{}/{}'.format(i, N))
-
-        ann += [{
-            'image_id': int(data[i, 0]),
-            'bbox': [data[i, 1], data[i, 2], data[i, 3], data[i, 4]],
-            'score': data[i, 5],
-            'category_id': int(data[i, 6]),
-        }]
-
-    return ann
-
-
-def test_coco(model):
-    global oh, ow
-    catId2cls, cls2catId, catId2name = joblib.load(
-        r'D:/(catId2cls,cls2catId,catId2name).pkl')
-    test_dir = r'D:\dataset\val2017/'
-    names = os.listdir(test_dir)
-    names = [name.split('.')[0] for name in names]
-    names = sorted(names)
-
-    i = 0
-    mm = 1000000
-    Res = []
-    Res_mask = []
-    start_time = datetime.now()
-    for name in names[:mm]:
-        i += 1
-
-        print(datetime.now(), i)
-
-        im_file = test_dir + name + '.jpg'
-        img = cv2.imread(im_file)
-        oh, ow = img.shape[:2]
-
-        with torch.no_grad():
-            res = model.predict(img)
-        res = res[:200]
-
-        wh = res[:, 2:4] - res[:, :2] + 1
-
-        imgId = int(name)
-        m = res.shape[0]
-
-        imgIds = np.zeros((m, 1)) + imgId
-
-        cls = res[:, 5]
-        cid = map(lambda x: cls2catId[x], cls)
-        cid = list(cid)
-        cid = np.array(cid)
-        cid = cid.reshape(-1, 1)
-
-        res = np.concatenate((imgIds, res[:, :2], wh, res[:, 4:5], cid), axis=1)
-        # Res=np.concatenate([Res,res])
-        res = np.round(res, 4)
-        Res.append(res)
-    Res = np.concatenate(Res, axis=0)
-
-    Ann = loadNumpyAnnotations(Res)
-    print('==================================', mm, datetime.now() - start_time)
-    with codecs.open('yolov3_bbox.json', 'w', 'ascii') as f:
-        json.dump(Ann, f)
-    eval_coco_box.eval('yolov3_bbox.json', mm)
-    pass
-
-
-def model2onnx(model, output_names, onnx_name):
+def model2onnx(model, onnx_name):
     dummy_input = torch.randn(1, 3, model.input_height, model.input_width)
     # device = torch.device("cuda")
 
@@ -537,11 +498,12 @@ def model2onnx(model, output_names, onnx_name):
     #     'out3'
     #
     # ]
+    output_names = ['out']
 
     torch.onnx.export(
-        model, dummy_input, onnx_name, verbose=True, opset_version=11,
-        input_names=input_names, output_names=output_names,
-        dynamic_axes={'input_batch': {0: 'batch'}, 'out1': {0: 'batch'}, 'out2': {0: 'batch'}})
+        model, dummy_input, onnx_name, verbose=True,
+        input_names=input_names, output_names=output_names, opset_version=11,
+        dynamic_axes={'input_batch': {0: 'batch', 2: 'h', 3: 'w'}, 'out': {0: 'batch'}})
 
 
 if __name__ == "__main__":
@@ -551,9 +513,7 @@ if __name__ == "__main__":
     cfg_file = r'yolo-fastest-1.1_body/yolo-fastest-1.1_body.cfg'
     weights_file = r'yolo-fastest-1.1_body/yolo-fastest-1.1_body.weights'
 
-    config = Config(files, cfg_file, weights_file, equal_scale=False)
-
-    model = YOLOv3(config)
+    model = YOLOv3(cfg_file)
     print(model)
     model.eval()
     # model.eval()
@@ -577,67 +537,4 @@ if __name__ == "__main__":
 
     model.load_state_dict(model_static)
 
-    model2onnx(model, ['out1', 'out2'][:model.base_anchors.shape[0]], 'yolo_fastest_body.onnx')
-
-    # cuda(model)
-    # test_coco(model)
-
-    # for name, p in model.named_parameters():
-    #     print(name,p.shape)
-    # x = torch.randn((1, 3, 544, 544))
-    # img = cv2.imread(r'D:\dataset\val2017\000000000139.jpg')
-    # bboxes = model.predict(img.copy())
-    # print(bboxes.shape)
-    # # outs = yolov3(x)
-    # # for out in outs:
-    # #     print(out.shape)
-    # frame = img.copy()
-    # for bbox in bboxes:
-    #     x1, y1, x2, y2, score, cls = bbox
-    #     x1 = int(x1)
-    #     y1 = int(y1)
-    #     x2 = int(x2)
-    #     y2 = int(y2)
-    #     frame = cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 255))
-    #     frame = cv2.putText(frame, str(int(cls)), (x1, y1), font, 1., (0, 0, 0), 2)
-    # cv2.imshow('img', frame)
-    # cv2.waitKey(10000)
-
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.373
-# Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.666
-# Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.381
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.203
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.410
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.529
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.297
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.453
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.476
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.290
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.516
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.638
-
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.095
-# Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.200
-# Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.080
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.001
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.067
-# Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.259
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.118
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.187
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.201
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.018
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.186
-# Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.411
-
-#  Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.163
-#  Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ] = 0.362
-#  Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ] = 0.125
-#  Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.051
-#  Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.185
-#  Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.258
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ] = 0.164
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ] = 0.253
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ] = 0.268
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ] = 0.086
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ] = 0.308
-#  Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ] = 0.417
+    model2onnx(model, 'yolo_fastest_body.onnx')

@@ -40,26 +40,15 @@ def decode_net(net, anchors, coord, stride):
     return np.concatenate((bboxes, net), axis=-1)
 
 
-def postprocess_yolo_fastest(results, wh, num_cls, thresh, nms_thresh=0.45):
-    decode = []
-    i = 0
-    for out in results:
-        out = np.transpose(out, (0, 2, 3, 1))[0]
-        m_H, m_W = out.shape[:2]
-        out = out.reshape(m_H, m_W, 3, -1)
-        out = decode_net(out, base_anchors[i], coords[i][:m_H, :m_W], stride[i])
-        out = out.reshape(-1, num_cls + 5)
-        decode.append(out)
-        i += 1
-    outs = np.concatenate(decode, axis=0)
+def postprocess_yolo_fastest(results, thresh, nms_thresh=0.45):
+    outs = results[0][0]
+    num_cls = outs.shape[-1] - 5
     conf = outs[:, 4]
     thresh = max(np.sort(conf)[::-1][100], thresh)
     inds = conf >= thresh
     outs = outs[inds]
 
     outs[:, 5:] = outs[:, 4:5] * outs[:, 5:]
-    outs[:, slice(0, 4, 2)] = np.clip(outs[:, slice(0, 4, 2)], 0, wh[0])
-    outs[:, slice(1, 4, 2)] = np.clip(outs[:, slice(1, 4, 2)], 0, wh[1])
     outs[:, 2:4] = outs[:, 2:4] - outs[:, :2]
     bboxes = outs[:, :4]
     if num_cls > 1:
@@ -97,7 +86,6 @@ def postprocess_yolo_fastest(results, wh, num_cls, thresh, nms_thresh=0.45):
         score = score.reshape(-1, 1)
         cls = np.zeros(score.shape)
         bboxes = np.concatenate([bboxes, score, cls], axis=-1)
-    bboxes[:, :4] = bboxes[:, :4] / np.array([wh[0], wh[1], wh[0], wh[1]])
     return bboxes
 
 
@@ -127,7 +115,7 @@ if __name__ == "__main__":
     img = cv2.resize(frame, (320, 320))
     img = preprocess(img)
     outputs = session.run(None, {'input_batch': img})
-    bboxes = postprocess_yolo_fastest(outputs, (320, 320), 1, 0.7, 0.25)
+    bboxes = postprocess_yolo_fastest(outputs, 0.7, 0.25)
     bboxes[:, :4] = bboxes[:, :4] * np.array([w, h, w, h])
     for bbox in bboxes:
         x1, y1, x2, y2, score, cls = bbox
