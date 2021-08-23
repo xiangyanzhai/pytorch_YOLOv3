@@ -477,10 +477,10 @@ class YOLOv3(nn.Module):
             decode.append(out)
             i += 1
         decode = torch.cat(decode, dim=1)
-        decode[..., slice(0, 4, 2)] = torch.clamp(decode[..., slice(0, 4, 2)], 0, input_width)
-        decode[..., slice(1, 4, 2)] = torch.clamp(decode[..., slice(1, 4, 2)], 0, input_height)
-        decode[..., :4] = decode[..., :4] / cuda(
-            torch.tensor([input_width, input_height, input_width, input_height], dtype=torch.float32))
+        # decode[..., slice(0, 4, 2)] = torch.clamp(decode[..., slice(0, 4, 2)], 0, input_width)
+        # decode[..., slice(1, 4, 2)] = torch.clamp(decode[..., slice(1, 4, 2)], 0, input_height)
+        # decode[..., :4] = decode[..., :4] / cuda(
+        #     torch.tensor([int(input_width), (input_height), int(input_width), int(input_height)], dtype=torch.float32))
         return decode
 
 
@@ -522,6 +522,8 @@ if __name__ == "__main__":
     vars_shapes = []
     keys = []
     for key in model_static.keys():
+        if 'layer' not in key:
+            continue
         if 'num_batches_tracked' in key:
             continue
         v = model_static[key]
