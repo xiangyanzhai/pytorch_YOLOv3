@@ -3,41 +3,16 @@
 import onnxruntime
 import numpy as np
 import cv2
+import time
 
 
-def get_coord(N, stride):
-    t = np.arange(int(N / stride))
-    x, y = np.meshgrid(t, t)
-    x = x[..., None]
-    y = y[..., None]
-    coord = np.concatenate((x, y, x, y), axis=-1)
-    coord = coord[:, :, None, :]
-    coord = coord * stride
-    return coord
-
-
-base_anchors = np.array([7, 17, 20, 50, 45, 99, 64, 187, 123, 211, 227, 264], dtype=np.float32)
-base_anchors = base_anchors.reshape(-1, 3, 2)
-base_anchors = base_anchors[::-1].copy()
-
-coords = []
-stride = [32, 16]
-for i in range(len(stride)):
-    coords.append(get_coord(320, stride[i]))
-
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
-
-
-def decode_net(net, anchors, coord, stride):
-    xy = sigmoid(net[..., :2]) * stride
-    wh = np.exp(net[..., 2:4]) * anchors
-    xy1 = xy - wh / 2
-    xy2 = xy + wh / 2
-    bboxes = np.concatenate((xy1, xy2), axis=-1) + coord
-    net = sigmoid(net[..., 4:])
-    return np.concatenate((bboxes, net), axis=-1)
+def preprocess_yolo(frame):
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    frame = frame.astype(np.float32)
+    frame = frame / 255
+    frame = np.transpose(frame, (2, 0, 1))
+    frame = frame[None]
+    return frame
 
 
 def postprocess_yolo_fastest(results, wh, thresh, nms_thresh=0.45):
@@ -68,7 +43,7 @@ def postprocess_yolo_fastest(results, wh, thresh, nms_thresh=0.45):
         score = outs[:, 5:].max(axis=-1)
         outs[:, 4] = score
         outs[:, 5] = cls
-        inds = score > 0.005
+        inds = score > thresh
         outs = outs[inds]
         outs[:, 2:4] += outs[:, :2]
         inds = outs[:, 4].argsort()[::-1]
@@ -89,23 +64,12 @@ def postprocess_yolo_fastest(results, wh, thresh, nms_thresh=0.45):
         cls = np.zeros(score.shape)
         bboxes = np.concatenate([bboxes, score, cls], axis=-1)
     bboxes[:, :4] = bboxes[:, :4] / np.array([wh[0], wh[1], wh[0], wh[1]])
+    bboxes = bboxes.astype(np.float64)
     return bboxes
 
 
-def preprocess(frame):
-    # frame = cv2.resize(frame, (self.input_w, self.input_h))
-    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    frame = frame.astype(np.float32)
-    frame = frame / 255
-    frame = np.transpose(frame, (2, 0, 1))
-    frame = frame[None]
-    return frame
-
-
-font = cv2.FONT_HERSHEY_SIMPLEX
-if __name__ == "__main__":
-
-    session = onnxruntime.InferenceSession(r'yolo_fastest_body.onnx')
+def test(onnx_file, img_file, conf_thresh, nms_thresh, wh):
+    session = onnxruntime.InferenceSession(onnx_file)
     inputs = session.get_inputs()
     outputs = session.get_outputs()
     for i in inputs:
@@ -113,20 +77,35 @@ if __name__ == "__main__":
     print('==============================')
     for i in outputs:
         print(i.shape, i.name)
-    frame = cv2.imread('000000011051.jpg')
+    input_h, input_w = wh[::-1]
+    print(input_h, input_w)
+    frame = cv2.imread(img_file)
     h, w = frame.shape[:2]
-    img = cv2.resize(frame, (320, 320))
-    img = preprocess(img)
-    outputs = session.run(None, {'input_batch': img})
-    bboxes = postprocess_yolo_fastest(outputs, (320, 320), 0.7, 0.25)
+    img = cv2.resize(frame, (input_w, input_h))
+    img = preprocess_yolo(img)
+    t1 = time.time()
+    outputs = session.run(None, {inputs[0].name: img})
+    t2 = time.time()
+    print("*********'", t2 - t1)
+
+    bboxes = postprocess_yolo_fastest(outputs, (input_w, input_h), conf_thresh,
+                                      nms_thresh=nms_thresh)
     bboxes[:, :4] = bboxes[:, :4] * np.array([w, h, w, h])
     for bbox in bboxes:
         x1, y1, x2, y2, score, cls = bbox
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        # print(x1, y1, x2, y2)
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), thickness=2)
-        cv2.putText(frame, str(round(score, 2)), (int(x1 + 10), int(y1 + 10)), font, 0.8, (255, 255, 255), 2)
-    cv2.imshow('img', frame)
-    cv2.waitKey(1000)
+        label = 'cls=' + str(int(cls)) + ' ' + 'score=' + str(round(score, 4))
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, label, (x1, y1 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+    cv2.imshow('img_onnx', frame)
+    cv2.waitKey(2000)
+    return input_w, input_h
 
-    pass
+
+if __name__ == "__main__":
+    onnx_file = r'yolo_fastest_body.onnx'
+    img_file = r'000000011051.jpg'
+    conf_thresh = 0.3
+    nms_thresh = 0.45
+    input_w, input_h = (320, 320)
+    test(onnx_file, img_file, conf_thresh, nms_thresh, (input_w, input_h))

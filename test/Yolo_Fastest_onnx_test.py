@@ -127,14 +127,14 @@ if __name__ == "__main__":
     img = cv2.resize(frame, (320, 320))
     img = preprocess(img)
     outputs = session.run(None, {'input_batch': img})
-    bboxes = postprocess_yolo_fastest(outputs, (320, 320), 1, 0.7, 0.25)
+    bboxes = postprocess_yolo_fastest(outputs, (320, 320), 1, 0.3, 0.45)
     bboxes[:, :4] = bboxes[:, :4] * np.array([w, h, w, h])
     for bbox in bboxes:
         x1, y1, x2, y2, score, cls = bbox
         x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-        # print(x1, y1, x2, y2)
+        label = 'cls=' + str(int(cls)) + ' ' + 'score=' + str(round(score, 4))
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), thickness=2)
-        cv2.putText(frame, str(round(score, 2)), (int(x1 + 10), int(y1 + 10)), font, 0.8, (255, 255, 255), 2)
+        cv2.putText(frame, label, (x1 + 5, y1 + 15), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
     cv2.imshow('img', frame)
     cv2.waitKey(1000)
 
