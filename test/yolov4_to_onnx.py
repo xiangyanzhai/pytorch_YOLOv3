@@ -489,21 +489,22 @@ class Darknet(nn.Module):
                 #     boxes = self.models[ind](x)
                 #     out_boxes.append(boxes)
                 boxes = self.models[ind](x)
-                out_boxes.append([boxes, stride.index(int(model.width // x.size(-1))), self.anchors[len(out_boxes)]])
+                out_boxes.append(boxes)
             elif block['type'] == 'cost':
                 continue
             else:
                 print('unknown type %s' % (block['type']))
 
         decode = []
-        for out, idx, anchor in out_boxes:
+        i = 0
+        for out in out_boxes:
             batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
             out = out.reshape(batch, m_H, m_W, 3, -1)
-            out = decode_net(out, anchor, coords[idx][:m_H, :m_W], stride[idx])
+            out = decode_net(out, self.anchors[i], self.coords[i][:m_H, :m_W], self.stride[i])
             out = out.view(batch, -1, self.num_classes + 5)
             decode.append(out)
-
+            i += 1
         decode = torch.cat(decode, dim=1)
         return decode
 
@@ -512,7 +513,11 @@ class Darknet(nn.Module):
 
     def create_network(self, blocks):
         models = nn.ModuleList()
+
         self.anchors = []
+        self.stride = []
+        self.coords = []
+
         prev_filters = 3
         out_filters = []
         prev_stride = 1
@@ -607,7 +612,7 @@ class Darknet(nn.Module):
                 prev_stride = prev_stride // stride
                 out_strides.append(prev_stride)
 
-                models.append(Upsample_expand(stride))
+                models.append(nn.Upsample(scale_factor=stride))
                 # models.append(Upsample_interpolate(stride))
 
             elif block['type'] == 'route':
@@ -707,10 +712,11 @@ class Darknet(nn.Module):
                 anchor = anchor.reshape(-1, 2)
                 self.anchors.append(anchor)
                 self.num_classes = int(block['classes'])
-
+                self.stride.append(prev_stride)
+                self.coords.append(get_coord(max(640, max(self.height, self.width)), prev_stride))
                 out_filters.append(prev_filters)
                 out_strides.append(prev_stride)
-                models.append(EmptyModule())
+                models.append(nn.Identity())
             else:
                 print('unknown type %s' % (block['type']))
 
@@ -834,10 +840,10 @@ def get_coord(N, stride):
     return torch.tensor(coord, dtype=torch.float32)
 
 
-coords = []
-stride = [8, 16, 32, 64]
-for i in range(4):
-    coords.append(get_coord(640, stride[i]))
+# coords = []
+# stride = [8, 16, 32, 64]
+# for i in range(4):
+#     coords.append(get_coord(640, stride[i]))
 
 
 def decode_net(net, anchors, coord, stride):
