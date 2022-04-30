@@ -1,5 +1,8 @@
 # !/usr/bin/python
 # -*- coding:utf-8 -*-
+import os
+
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -486,18 +489,18 @@ class Darknet(nn.Module):
                 #     boxes = self.models[ind](x)
                 #     out_boxes.append(boxes)
                 boxes = self.models[ind](x)
-                out_boxes.append([boxes, stride.index(int(model.width // x.size(-1)))])
+                out_boxes.append([boxes, stride.index(int(model.width // x.size(-1))), self.anchors[len(out_boxes)]])
             elif block['type'] == 'cost':
                 continue
             else:
                 print('unknown type %s' % (block['type']))
 
         decode = []
-        for out, idx in out_boxes:
+        for out, idx, anchor in out_boxes:
             batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
             out = out.reshape(batch, m_H, m_W, 3, -1)
-            out = decode_net(out, self.anchors[idx], coords[idx][:m_H, :m_W], stride[idx])
+            out = decode_net(out, anchor, coords[idx][:m_H, :m_W], stride[idx])
             out = out.view(batch, -1, self.num_classes + 5)
             decode.append(out)
 
@@ -509,7 +512,7 @@ class Darknet(nn.Module):
 
     def create_network(self, blocks):
         models = nn.ModuleList()
-
+        self.anchors = []
         prev_filters = 3
         out_filters = []
         prev_stride = 1
@@ -695,9 +698,14 @@ class Darknet(nn.Module):
                 # yolo_layer.coord_scale = float(block['coord_scale'])
                 anchors = block['anchors'].split(',')
                 anchors = list(map(float, anchors))
-                anchors = np.array(anchors, dtype=np.float32)
-                anchors = anchors.reshape(-1, 3, 2)
-                self.anchors = torch.tensor(anchors)
+                anchor_mask = block['mask'].split(',')
+                anchor_mask = list(map(int, anchor_mask))
+                anchor = []
+                for mask in anchor_mask:
+                    anchor += anchors[2 * mask:2 * mask + 2]
+                anchor = torch.tensor(anchor, dtype=torch.float32)
+                anchor = anchor.reshape(-1, 2)
+                self.anchors.append(anchor)
                 self.num_classes = int(block['classes'])
 
                 out_filters.append(prev_filters)
