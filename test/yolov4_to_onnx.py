@@ -495,8 +495,8 @@ class Darknet(nn.Module):
         decode = []
         i = 0
         for out in out_boxes:
+            batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
-            m_H, m_W = out.shape[1:3]
             out = out.reshape(batch, m_H, m_W, 3, -1)
             out = decode_net(out, self.anchors[i], coords[i][:m_H, :m_W], stride[i])
             out = out.view(batch, -1, self.num_classes + 5)
