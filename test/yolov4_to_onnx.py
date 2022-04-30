@@ -486,22 +486,21 @@ class Darknet(nn.Module):
                 #     boxes = self.models[ind](x)
                 #     out_boxes.append(boxes)
                 boxes = self.models[ind](x)
-                out_boxes.append(boxes)
+                out_boxes.append([boxes, stride.index(int(model.width // x.size(-1)))])
             elif block['type'] == 'cost':
                 continue
             else:
                 print('unknown type %s' % (block['type']))
 
         decode = []
-        i = 0
-        for out in out_boxes:
+        for out, idx in out_boxes:
             batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
             out = out.reshape(batch, m_H, m_W, 3, -1)
-            out = decode_net(out, self.anchors[i], coords[i][:m_H, :m_W], stride[i])
+            out = decode_net(out, self.anchors[idx], coords[idx][:m_H, :m_W], stride[idx])
             out = out.view(batch, -1, self.num_classes + 5)
             decode.append(out)
-            i += 1
+
         decode = torch.cat(decode, dim=1)
         return decode
 
