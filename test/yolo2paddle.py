@@ -432,7 +432,6 @@ class YOLOv3(nn.Layer):
         return outs
 
     def forward(self, x):
-        batch, _, input_height, input_width = x.shape
         net = []
         outs = []
         for index, xx in enumerate(self.blocks):
@@ -441,9 +440,7 @@ class YOLOv3(nn.Layer):
 
             elif (xx["type"] == "upsample"):
                 stride = int(xx["stride"])
-                x = F.interpolate(x, size=(
-                    input_height // self.stride[len(outs)],
-                    input_width // self.stride[len(outs)]))
+                x = F.interpolate(x, scale_factor=stride)
 
             elif (xx["type"] == "route"):
                 temp = []
@@ -471,10 +468,9 @@ class YOLOv3(nn.Layer):
                 net.append(None)
         decode = []
         i = 0
-
         for out in outs:
+            batch, _, m_H, m_W = out.shape
             out = paddle.transpose(x=out, perm=[0, 2, 3, 1])
-            m_H, m_W = out.shape[1:3]
             out = paddle.reshape(out, [batch, m_H, m_W, 3, -1])
             out = decode_net(out, self.base_anchors[i], getattr(self, 'coord_' + str(i))[:m_H, :m_W], self.stride[i])
             out = paddle.reshape(out, (batch, -1, self.num_cls + 5))
@@ -525,7 +521,7 @@ if __name__ == "__main__":
 
     from paddle.static import InputSpec
 
-    x_spec = InputSpec(shape=[1, 3, model.input_height, model.input_width], dtype='float32', name='x')
+    x_spec = InputSpec(shape=[None, 3, model.input_height, model.input_width], dtype='float32', name='x')
     print('************ start ************')
     # step 3: 调用 jit.save 接口
     net = paddle.jit.save(model, path=r'./solidball/model',
