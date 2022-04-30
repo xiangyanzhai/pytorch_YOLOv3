@@ -428,7 +428,6 @@ class YOLOv3(nn.Module):
         return outs
 
     def forward(self, x):
-        batch, _, input_height, input_width = x.shape
         net = []
         outs = []
         for index, xx in enumerate(self.blocks):
@@ -437,9 +436,7 @@ class YOLOv3(nn.Module):
 
             elif (xx["type"] == "upsample"):
                 stride = int(xx["stride"])
-                x = F.interpolate(x, size=(
-                    input_height // self.stride[len(outs)],
-                    input_width // self.stride[len(outs)]))
+                x = F.interpolate(x, scale_factor=stride)
 
             elif (xx["type"] == "route"):
                 temp = []
@@ -467,10 +464,9 @@ class YOLOv3(nn.Module):
                 net.append(None)
         decode = []
         i = 0
-
         for out in outs:
+            batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
-            m_H, m_W = out.shape[1:3]
             out = out.reshape(batch, m_H, m_W, 3, -1)
             out = decode_net(out, self.base_anchors[i], self.coords[i][:m_H, :m_W], self.stride[i])
             out = out.view(batch, -1, self.num_cls + 5)
