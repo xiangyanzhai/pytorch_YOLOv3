@@ -203,7 +203,6 @@ class conv(nn.Module):
 
 
 def decode_net(net, anchors, coord, stride):
-    net = torch.sigmoid(net)
     xy = net[..., :2] * 2 - 0.5
     wh = ((net[..., 2:4]) * 2) ** 2
     xy = xy * stride
@@ -471,6 +470,7 @@ class YOLOv3(nn.Module):
         decode = []
         i = 0
         for out in outs:
+            out = out.sigmoid()
             batch, _, m_H, m_W = out.shape
             out = out.permute(0, 2, 3, 1)
             out = out.reshape(batch, m_H, m_W, 3, -1)
