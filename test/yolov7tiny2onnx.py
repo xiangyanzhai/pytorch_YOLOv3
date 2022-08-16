@@ -445,7 +445,11 @@ class YOLOv3(nn.Module):
                 for idx in xx["layers"]:
                     idx = int(idx)
                     temp.append(net[idx])
-                x = torch.cat(temp, dim=1)
+
+                if len(temp) > 1:
+                    x = torch.cat(temp, dim=1)
+                else:
+                    x = temp[0]
 
             elif xx["type"] == "shortcut":
                 s = int(xx['from'])
