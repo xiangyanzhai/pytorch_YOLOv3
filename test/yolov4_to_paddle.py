@@ -858,7 +858,7 @@ def get_coord(N, stride):
     x, y = np.meshgrid(t, t)
     x = x[..., None]
     y = y[..., None]
-    coord = np.concatenate((x, y, x, y), axis=-1)
+    coord = np.concatenate((x, y), axis=-1)
     coord = coord[:, :, None, :]
     coord = coord * stride
     return paddle.to_tensor(coord, dtype=paddle.float32)
@@ -871,13 +871,12 @@ def get_coord(N, stride):
 
 
 def decode_net(net, anchors, coord, stride):
-    xy = F.sigmoid(net[..., :2]) * stride
+    xy = F.sigmoid(net[..., :2]) * stride + coord
     wh = paddle.exp(net[..., 2:4]) * anchors
     xy1 = xy - wh / 2
     xy2 = xy + wh / 2
-    bboxes = paddle.concat((xy1, xy2), axis=-1) + coord
     net = F.sigmoid(net[..., 4:])
-    return paddle.concat([bboxes, net], axis=-1)
+    return paddle.concat([xy1, xy2, net], axis=-1)
 
 
 def paddle_static(model, save_path):

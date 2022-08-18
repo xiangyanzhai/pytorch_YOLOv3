@@ -60,7 +60,7 @@ def get_coord(N, stride):
 
     x = x[..., None]
     y = y[..., None]
-    coord = np.concatenate((x, y, x, y), axis=-1)
+    coord = np.concatenate((x, y), axis=-1)
     coord = coord[:, :, None, :]
     coord = coord * stride
     return paddle.to_tensor(coord, dtype=paddle.float32)
@@ -205,13 +205,12 @@ class conv(nn.Layer):
 
 
 def decode_net(net, anchors, coord, stride):
-    xy = F.sigmoid(net[..., :2]) * stride
+    xy = F.sigmoid(net[..., :2]) * stride + coord
     wh = paddle.exp(net[..., 2:4]) * anchors
     xy1 = xy - wh / 2
     xy2 = xy + wh / 2
-    bboxes = paddle.concat((xy1, xy2), axis=-1) + coord
     net = F.sigmoid(net[..., 4:])
-    return paddle.concat([bboxes, net], axis=-1)
+    return paddle.concat([xy1, xy2, net], axis=-1)
 
 
 class YOLOv3(nn.Layer):
@@ -345,7 +344,7 @@ class YOLOv3(nn.Layer):
                 cuda(get_coord(max(max(self.input_width, self.input_height), 640), self.stride[idx])))
             m_H, m_W = self.input_height // self.stride[idx], self.input_width // self.stride[idx]
             t = coords[idx][:m_H, :m_W]
-            t = t.reshape((-1, 1, 4))
+            t = t.reshape((-1, 1, 2))
             self.register_buffer('coord_' + str(idx), t)
             self.register_buffer('anchor_' + str(idx), anchor)
 

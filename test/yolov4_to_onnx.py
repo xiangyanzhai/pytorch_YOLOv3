@@ -834,7 +834,7 @@ def get_coord(N, stride):
     x, y = np.meshgrid(t, t)
     x = x[..., None]
     y = y[..., None]
-    coord = np.concatenate((x, y, x, y), axis=-1)
+    coord = np.concatenate((x, y), axis=-1)
     coord = coord[:, :, None, :]
     coord = coord * stride
     return torch.tensor(coord, dtype=torch.float32)
@@ -847,13 +847,12 @@ def get_coord(N, stride):
 
 
 def decode_net(net, anchors, coord, stride):
-    xy = torch.sigmoid(net[..., :2]) * stride
+    xy = torch.sigmoid(net[..., :2]) * stride + coord
     wh = torch.exp(net[..., 2:4]) * anchors
     xy1 = xy - wh / 2
     xy2 = xy + wh / 2
-    bboxes = torch.cat((xy1, xy2), dim=-1) + coord
     net = torch.sigmoid(net[..., 4:])
-    return torch.cat([bboxes, net], dim=-1)
+    return torch.cat([xy1, xy2, net], dim=-1)
 
 
 def model2onnx(model, onnx_name):

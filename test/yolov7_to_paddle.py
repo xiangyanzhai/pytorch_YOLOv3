@@ -873,13 +873,12 @@ def get_coord(N, stride):
 def decode_net(net, anchors, coord, stride):
     xy = net[..., :2] * 2 - 0.5
     wh = ((net[..., 2:4]) * 2) ** 2
-    xy = xy * stride
+    xy = xy * stride + coord
     wh = wh * anchors
     xy1 = xy - wh / 2
     xy2 = xy + wh / 2
-    bboxes = paddle.concat((xy1, xy2), axis=-1) + coord
     net = net[..., 4:]
-    return paddle.concat([bboxes, net], axis=-1)
+    return paddle.concat([xy1, xy2, net], axis=-1)
 
 
 def paddle_static(model, save_path):
