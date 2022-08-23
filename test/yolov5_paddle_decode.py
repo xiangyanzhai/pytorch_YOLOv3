@@ -47,10 +47,9 @@ class Detect(nn.Layer):
         self.inplace = inplace  # use in-place ops (e.g. slice assignment)
 
     def decode(self, out, idx):
-        batch = out.shape[0]
-        out = paddle.transpose(out, (0, 2, 3, 1))
-        m_H, m_W = out.shape[1:3]
-        out = paddle.reshape(out, (batch, m_H, m_W, 3, out.shape[-1] // 3))
+        batch, C, m_H, m_W = out.shape[0]
+        out = out.transpose((0, 2, 3, 1))
+        out = out.reshape((batch, m_H, m_W, 3, out.shape[-1] // 3))
         coord = getattr(self, 'coord_' + str(idx))[:m_H, :m_W]
 
         xy = F.sigmoid(out[..., :2]) * 2 - 0.5
@@ -67,11 +66,11 @@ class Detect(nn.Layer):
         shape_ = points.shape
 
         new_shape_ = list(shape_[:-1]) + [shape_[-1] // 2, 2]
-        points = paddle.reshape(points, new_shape_)
+        points = points.reshape(new_shape_)
         anchors = anchors[:, None]
         coord = paddle.unsqueeze(coord, -2)
         points = points * anchors + coord
-        points = paddle.reshape(points, shape_)
+        points = points.reshape(shape_)
 
         return paddle.concat([xy, wh, conf, points, cls], axis=-1)
 
@@ -84,7 +83,7 @@ class Detect(nn.Layer):
                 bs, _, ny, nx = x[i].shape  # x(bs,255,20,20) to x(bs,3,20,20,85)
                 y = self.decode(x[i], i)
 
-                z.append(paddle.reshape(y, (bs, y.shape[1] * y.shape[2] * y.shape[3], self.no)))
+                z.append(y.reshape((bs, y.shape[1] * y.shape[2] * y.shape[3], self.no)))
         if not self.training:
             return paddle.concat(z, 1)
             # x[i] = self.m[i](x[i])  # conv

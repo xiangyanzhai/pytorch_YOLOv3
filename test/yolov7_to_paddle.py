@@ -510,12 +510,12 @@ class Darknet(nn.Layer):
         i = 0
         for out in out_boxes:
             batch, C, m_H, m_W = out.shape
-            out = paddle.transpose(out, (0, 2, 3, 1))
-            out = paddle.reshape(out, (batch, m_H, m_W, 3, -1))
+            out = out.transpose((0, 2, 3, 1))
+            out = out.reshape((batch, m_H, m_W, 3, C // 3))
             out = decode_net(out, getattr(self, 'anchor_' + str(i)),
                              getattr(self, 'coord_' + str(i))[:m_H, :m_W],
                              self.stride[i])
-            out = paddle.reshape(out, (batch, -1, self.num_classes + 5))
+            out = out.reshape((batch, m_H * m_W * 3, self.num_classes + 5))
             decode.append(out)
             i += 1
 
@@ -858,7 +858,7 @@ def get_coord(N, stride):
     x, y = np.meshgrid(t, t)
     x = x[..., None]
     y = y[..., None]
-    coord = np.concatenate((x, y, x, y), axis=-1)
+    coord = np.concatenate((x, y), axis=-1)
     coord = coord[:, :, None, :]
     coord = coord * stride
     return paddle.to_tensor(coord, dtype=paddle.float32)
